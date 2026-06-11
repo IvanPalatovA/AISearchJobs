@@ -1,0 +1,84 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+      ENV_FILE: ${{ secrets.ENV_FILE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          test -n "$SERVER_HOST" || { echo "SERVER_HOST secret is empty"; exit 1; }
+          test -n "$SERVER_USER" || { echo "SERVER_USER secret is empty"; exit 1; }
+          test -n "$SERVER_SSH_KEY" || { echo "SERVER_SSH_KEY secret is empty"; exit 1; }
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -T 10 -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync files
+        run: |
+          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" \
+            "command -v rsync >/dev/null || (apt update && apt install -y rsync)"
+
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.venv' \
+            --exclude '.env' \
+            --exclude '.pytest_cache' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '.DS_Store' \
+            --exclude 'AI_Vacancy_Match_Agent/data' \
+            --exclude 'AI_Vacancy_Match_Agent/output' \
+            --exclude 'AI_Vacancy_Match_Agent/*.csv' \
+            --exclude 'AI_Vacancy_Match_Agent/*.json' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            ./ "$SERVER_USER@$SERVER_HOST:/home/app/AISearchJob/"
+
+      - name: Update env file
+        if: ${{ env.ENV_FILE != '' }}
+        run: |
+          printf '%s\n' "$ENV_FILE" | ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" \
+            "cat > /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chown app:app /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chmod 600 /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env"
+
+      - name: Restart app
+        run: |
+          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" <<'EOF'
+          set -euo pipefail
+
+          cd /home/app/AISearchJob/AI_Vacancy_Match_Agent
+          mkdir -p data/collected data/criteria data/filters output
+
+          if [ ! -d .venv ]; then
+            python3 -m venv .venv
+          fi
+
+          .venv/bin/python -m pip install --upgrade pip
+
+          if [ -s requirements.txt ]; then
+            .venv/bin/pip install -r requirements.txt
+          fi
+
+          chown -R app:app /home/app/AISearchJob
+          install -m 0644 /home/app/AISearchJob/deploy/superjobsearch.service /etc/systemd/system/superjobsearch.service
+          systemctl daemon-reload
+          systemctl enable superjobsearch
+          systemctl restart superjobsearch
+          systemctl is-active --quiet superjobsearch
+          EOF

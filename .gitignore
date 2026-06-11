@@ -1,0 +1,13 @@
+AI_Vacancy_Match_Agent/.env
+AI_Vacancy_Match_Agent/.venv
+
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
+AI_Vacancy_Match_Agent/output/
+AI_Vacancy_Match_Agent/data/
+AI_Vacancy_Match_Agent/*.csv
+AI_Vacancy_Match_Agent/*.json
+AISearchJob_*.zip
+.DS_Store

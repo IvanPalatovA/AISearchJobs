@@ -1,0 +1,20 @@
+[Unit]
+Description=AI Vacancy Search web app and Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=app
+Group=app
+WorkingDirectory=/home/app/AISearchJob/AI_Vacancy_Match_Agent
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=REQUIRE_TELEGRAM_BOT=1
+EnvironmentFile=/home/app/AISearchJob/AI_Vacancy_Match_Agent/.env
+ExecStart=/home/app/AISearchJob/AI_Vacancy_Match_Agent/.venv/bin/python -u src/web_app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
