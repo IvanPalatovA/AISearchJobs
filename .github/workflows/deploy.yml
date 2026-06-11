@@ -59,7 +59,7 @@ jobs:
 
       - name: Restart app
         run: |
-          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" <<'EOF'
+          ssh -tt -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" <<'EOF'
           set -euo pipefail
 
           cd /home/app/AISearchJob/AI_Vacancy_Match_Agent
@@ -76,7 +76,7 @@ jobs:
           fi
 
           chown -R app:app /home/app/AISearchJob
-          sudo install -m 0644 /home/app/AISearchJob/deploy/superjobsearch.service /etc/systemd/system/superjobsearch.service
+          sudo cp /home/app/AISearchJob/deploy/superjobsearch.service /etc/systemd/system/superjobsearch.service
           systemctl daemon-reload
           systemctl enable superjobsearch
           systemctl restart superjobsearch
