@@ -76,7 +76,7 @@ jobs:
           fi
 
           chown -R app:app /home/app/AISearchJob
-          install -m 0644 /home/app/AISearchJob/deploy/superjobsearch.service /etc/systemd/system/superjobsearch.service
+          sudo install -m 0644 /home/app/AISearchJob/deploy/superjobsearch.service /etc/systemd/system/superjobsearch.service
           systemctl daemon-reload
           systemctl enable superjobsearch
           systemctl restart superjobsearch
