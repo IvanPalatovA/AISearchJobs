@@ -24,49 +24,33 @@ jobs:
           test -n "$SERVER_HOST" || { echo "SERVER_HOST secret is empty"; exit 1; }
           test -n "$SERVER_USER" || { echo "SERVER_USER secret is empty"; exit 1; }
           test -n "$SERVER_SSH_KEY" || { echo "SERVER_SSH_KEY secret is empty"; exit 1; }
+          test "$SERVER_USER" = "root" || { echo "SERVER_USER must be root (current: $SERVER_USER)"; exit 1; }
 
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$SERVER_SSH_KEY" | sed 's/\r$//' > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" | sed 's/\r$//' > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          ssh-keygen -y -f "$HOME/.ssh/deploy_key" >/dev/null
+
           echo "Deploy key fingerprint:"
-          ssh-keygen -lf ~/.ssh/deploy_key
-          echo "Connecting as user: ${SERVER_USER}"
-          echo "Offering public key:"
-          ssh-keygen -y -f ~/.ssh/deploy_key
+          ssh-keygen -lf "$HOME/.ssh/deploy_key"
 
-          if [ "${SERVER_USER}" != "root" ]; then
-            echo "::error::SERVER_USER must be 'root' (current: ${SERVER_USER}). Deploy uses root + sudo."
-            exit 1
-          fi
+          ssh-keyscan -T 10 -H "$SERVER_HOST" >> "$HOME/.ssh/known_hosts"
+          chmod 644 "$HOME/.ssh/known_hosts"
 
-          ssh-keyscan -T 10 -H "$SERVER_HOST" >> ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
+          DEPLOY_TARGET="${SERVER_USER}@${SERVER_HOST}"
+          SSH_BASE=(ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new)
 
-          {
-            echo "Host deploy-target"
-            echo "  HostName ${SERVER_HOST}"
-            echo "  User ${SERVER_USER}"
-            echo "  IdentityFile ~/.ssh/deploy_key"
-            echo "  IdentitiesOnly yes"
-            echo "  PubkeyAuthentication yes"
-            echo "  PreferredAuthentications publickey"
-            echo "  StrictHostKeyChecking accept-new"
-          } >> ~/.ssh/config
-          chmod 600 ~/.ssh/config
+          echo "DEPLOY_TARGET=${DEPLOY_TARGET}" >> "$GITHUB_ENV"
+          echo "RSYNC_RSH=ssh -i ${HOME}/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
 
-          ssh deploy-target "echo deploy ssh ok" || {
-            echo "::error::SSH login failed."
-            echo "Run on server console: bash -c 'curl -sL ...' OR paste deploy/fix-ssh-deploy.sh"
-            ssh -vvv deploy-target "echo deploy ssh ok" 2>&1 | tail -40 || true
-            exit 1
-          }
+          "${SSH_BASE[@]}" "$DEPLOY_TARGET" "echo deploy ssh ok"
 
       - name: Sync files
         run: |
-          ssh deploy-target \
-            "command -v rsync >/dev/null || (sudo apt-get update && sudo apt-get install -y rsync)"
+          ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            "$DEPLOY_TARGET" \
+            "command -v rsync >/dev/null || (apt-get update && apt-get install -y rsync)"
 
           rsync -az --delete \
             --exclude '.git' \
@@ -81,18 +65,20 @@ jobs:
             --exclude 'AI_Vacancy_Match_Agent/output' \
             --exclude 'AI_Vacancy_Match_Agent/*.csv' \
             --exclude 'AI_Vacancy_Match_Agent/*.json' \
-            -e "ssh -F ~/.ssh/config deploy-target" \
-            ./ deploy-target:/home/app/AISearchJob/
+            -e "$RSYNC_RSH" \
+            ./ "$DEPLOY_TARGET:/home/app/AISearchJob/"
 
       - name: Update env file
         if: ${{ env.ENV_FILE != '' }}
         run: |
-          printf '%s\n' "$ENV_FILE" | ssh deploy-target \
+          printf '%s\n' "$ENV_FILE" | ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            "$DEPLOY_TARGET" \
             "cat > /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chown app:app /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chmod 600 /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env"
 
       - name: Restart app
         run: |
-          ssh deploy-target <<'EOF'
+          ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            "$DEPLOY_TARGET" <<'EOF'
           set -euo pipefail
 
           cd /home/app/AISearchJob/AI_Vacancy_Match_Agent
@@ -109,9 +95,9 @@ jobs:
           fi
 
           chown -R app:app /home/app/AISearchJob
-          sudo install -m 0644 /home/app/AISearchJob/deploy/superjobsearch.service /etc/systemd/system/superjobsearch.service
-          sudo systemctl daemon-reload
-          sudo systemctl enable superjobsearch
-          sudo systemctl restart superjobsearch
-          sudo systemctl is-active --quiet superjobsearch
+          install -m 0644 /home/app/AISearchJob/deploy/superjobsearch.service /etc/systemd/system/superjobsearch.service
+          systemctl daemon-reload
+          systemctl enable superjobsearch
+          systemctl restart superjobsearch
+          systemctl is-active --quiet superjobsearch
           EOF
