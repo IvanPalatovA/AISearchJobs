@@ -48,7 +48,14 @@ jobs:
           } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
 
-          ssh deploy-target "echo deploy ssh ok"
+          ssh deploy-target "echo deploy ssh ok" || {
+            echo "::error::SSH login failed. On the server console run:"
+            echo "  chattr -i /root/.ssh/authorized_keys 2>/dev/null"
+            echo "  grep -qF \"\$(cat /root/.ssh/github_actions_deploy.pub)\" /root/.ssh/authorized_keys || cat /root/.ssh/github_actions_deploy.pub >> /root/.ssh/authorized_keys"
+            echo "  chmod 600 /root/.ssh/authorized_keys"
+            echo "Expected fingerprint above must exist in /root/.ssh/authorized_keys and SERVER_USER must be root."
+            exit 1
+          }
 
       - name: Sync files
         run: |
