@@ -215,6 +215,18 @@ EOF
 chmod 755 /etc/cron.daily/aide-check
 
 log "Configuring nginx reverse proxy..."
+NGINX_SRC=""
+for candidate in "$(dirname "$0")/nginx-superjobsearch.conf" "${APP_DIR}/deploy/nginx-superjobsearch.conf" "/root/nginx-superjobsearch.conf"; do
+  if [[ -f "${candidate}" ]]; then
+    NGINX_SRC="${candidate}"
+    break
+  fi
+done
+if [[ -n "${NGINX_SRC}" ]] && [[ -f /etc/letsencrypt/live/${DOMAIN}/fullchain.pem ]]; then
+  install -m 0644 "${NGINX_SRC}" /etc/nginx/sites-available/superjobsearch
+elif [[ -n "${NGINX_SRC}" ]]; then
+  install -m 0644 "${NGINX_SRC}" /etc/nginx/sites-available/superjobsearch
+else
 cat > /etc/nginx/sites-available/superjobsearch <<EOF
 server {
     listen 80 default_server;
@@ -235,8 +247,9 @@ server {
     }
 }
 EOF
+fi
 ln -sf /etc/nginx/sites-available/superjobsearch /etc/nginx/sites-enabled/superjobsearch
-rm -f /etc/nginx/sites-enabled/default
+rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/superjobsearch.ru
 nginx -t
 systemctl enable --now nginx
 

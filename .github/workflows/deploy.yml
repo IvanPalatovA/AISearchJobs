@@ -78,6 +78,13 @@ jobs:
           if [ -s requirements.txt ]; then .venv/bin/pip install -r requirements.txt; fi
           chown -R app:app /home/app/AISearchJob
           install -m 0644 /home/app/AISearchJob/deploy/superjobsearch.service /etc/systemd/system/superjobsearch.service
+          if [ -f /home/app/AISearchJob/deploy/nginx-superjobsearch.conf ]; then
+            install -m 0644 /home/app/AISearchJob/deploy/nginx-superjobsearch.conf /etc/nginx/sites-available/superjobsearch
+            ln -sf /etc/nginx/sites-available/superjobsearch /etc/nginx/sites-enabled/superjobsearch
+            rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/superjobsearch.ru
+            nginx -t
+            systemctl reload nginx
+          fi
           systemctl daemon-reload
           systemctl enable superjobsearch
           systemctl restart superjobsearch
