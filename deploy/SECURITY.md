@@ -58,6 +58,22 @@ cat /root/.ssh/github_actions_deploy
 
 Set secrets: `SERVER_HOST=109.205.58.239`, `SERVER_USER=root`.
 
+`SERVER_SSH_KEY` must be the **private** key matching a line in `/root/.ssh/authorized_keys`:
+
+```bash
+# on server — show public key that must be authorized
+cat /root/.ssh/github_actions_deploy.pub
+
+# on server — private key goes to GitHub secret (full PEM, including BEGIN/END lines)
+cat /root/.ssh/github_actions_deploy
+```
+
+Verify fingerprint on server and in GitHub Actions log (Configure SSH step):
+
+```bash
+ssh-keygen -lf /root/.ssh/github_actions_deploy.pub
+```
+
 ## App is not affected
 
 - Outbound **HTTPS** (hh.ru, Telegram, Resend, LLM API) — allowed
