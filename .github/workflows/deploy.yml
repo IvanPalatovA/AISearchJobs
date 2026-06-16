@@ -32,6 +32,14 @@ jobs:
           ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
           echo "Deploy key fingerprint:"
           ssh-keygen -lf ~/.ssh/deploy_key
+          echo "Connecting as user: ${SERVER_USER}"
+          echo "Offering public key:"
+          ssh-keygen -y -f ~/.ssh/deploy_key
+
+          if [ "${SERVER_USER}" != "root" ]; then
+            echo "::error::SERVER_USER must be 'root' (current: ${SERVER_USER}). Deploy uses root + sudo."
+            exit 1
+          fi
 
           ssh-keyscan -T 10 -H "$SERVER_HOST" >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
@@ -49,11 +57,9 @@ jobs:
           chmod 600 ~/.ssh/config
 
           ssh deploy-target "echo deploy ssh ok" || {
-            echo "::error::SSH login failed. On the server console run:"
-            echo "  chattr -i /root/.ssh/authorized_keys 2>/dev/null"
-            echo "  grep -qF \"\$(cat /root/.ssh/github_actions_deploy.pub)\" /root/.ssh/authorized_keys || cat /root/.ssh/github_actions_deploy.pub >> /root/.ssh/authorized_keys"
-            echo "  chmod 600 /root/.ssh/authorized_keys"
-            echo "Expected fingerprint above must exist in /root/.ssh/authorized_keys and SERVER_USER must be root."
+            echo "::error::SSH login failed."
+            echo "Run on server console: bash -c 'curl -sL ...' OR paste deploy/fix-ssh-deploy.sh"
+            ssh -vvv deploy-target "echo deploy ssh ok" 2>&1 | tail -40 || true
             exit 1
           }
 
