@@ -19,37 +19,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure SSH
+      - name: Deploy to server
         run: |
+          set -euo pipefail
+          echo "Workflow version: deploy-v3-single-step"
+
           test -n "$SERVER_HOST" || { echo "SERVER_HOST secret is empty"; exit 1; }
           test -n "$SERVER_USER" || { echo "SERVER_USER secret is empty"; exit 1; }
           test -n "$SERVER_SSH_KEY" || { echo "SERVER_SSH_KEY secret is empty"; exit 1; }
           test "$SERVER_USER" = "root" || { echo "SERVER_USER must be root (current: $SERVER_USER)"; exit 1; }
 
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
-          printf '%s\n' "$SERVER_SSH_KEY" | sed 's/\r$//' > "$HOME/.ssh/deploy_key"
-          chmod 600 "$HOME/.ssh/deploy_key"
-          ssh-keygen -y -f "$HOME/.ssh/deploy_key" >/dev/null
-
-          echo "Deploy key fingerprint:"
-          ssh-keygen -lf "$HOME/.ssh/deploy_key"
-
-          ssh-keyscan -T 10 -H "$SERVER_HOST" >> "$HOME/.ssh/known_hosts"
-          chmod 644 "$HOME/.ssh/known_hosts"
-
+          DEPLOY_KEY="${HOME}/.ssh/deploy_key"
           DEPLOY_TARGET="${SERVER_USER}@${SERVER_HOST}"
-          SSH_BASE=(ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new)
+          SSH_OPTS=(-i "$DEPLOY_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new)
 
-          echo "DEPLOY_TARGET=${DEPLOY_TARGET}" >> "$GITHUB_ENV"
-          echo "RSYNC_RSH=ssh -i ${HOME}/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
+          mkdir -p "${HOME}/.ssh"
+          chmod 700 "${HOME}/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" | sed 's/\r$//' > "$DEPLOY_KEY"
+          chmod 600 "$DEPLOY_KEY"
+          ssh-keygen -y -f "$DEPLOY_KEY" >/dev/null
+          echo "Deploy key fingerprint:"
+          ssh-keygen -lf "$DEPLOY_KEY"
 
-          "${SSH_BASE[@]}" "$DEPLOY_TARGET" "echo deploy ssh ok"
+          ssh-keyscan -T 10 -H "$SERVER_HOST" >> "${HOME}/.ssh/known_hosts"
 
-      - name: Sync files
-        run: |
-          ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
-            "$DEPLOY_TARGET" \
+          ssh "${SSH_OPTS[@]}" "$DEPLOY_TARGET" "echo deploy ssh ok"
+
+          ssh "${SSH_OPTS[@]}" "$DEPLOY_TARGET" \
             "command -v rsync >/dev/null || (apt-get update && apt-get install -y rsync)"
 
           rsync -az --delete \
@@ -65,39 +61,26 @@ jobs:
             --exclude 'AI_Vacancy_Match_Agent/output' \
             --exclude 'AI_Vacancy_Match_Agent/*.csv' \
             --exclude 'AI_Vacancy_Match_Agent/*.json' \
-            -e "$RSYNC_RSH" \
-            ./ "$DEPLOY_TARGET:/home/app/AISearchJob/"
+            -e "ssh -i ${DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+            ./ "${DEPLOY_TARGET}:/home/app/AISearchJob/"
 
-      - name: Update env file
-        if: ${{ env.ENV_FILE != '' }}
-        run: |
-          printf '%s\n' "$ENV_FILE" | ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
-            "$DEPLOY_TARGET" \
-            "cat > /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chown app:app /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chmod 600 /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env"
+          if [ -n "${ENV_FILE:-}" ]; then
+            printf '%s\n' "$ENV_FILE" | ssh "${SSH_OPTS[@]}" "$DEPLOY_TARGET" \
+              "cat > /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chown app:app /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chmod 600 /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env"
+          fi
 
-      - name: Restart app
-        run: |
-          ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
-            "$DEPLOY_TARGET" <<'EOF'
+          ssh "${SSH_OPTS[@]}" "$DEPLOY_TARGET" <<'EOF'
           set -euo pipefail
-
           cd /home/app/AISearchJob/AI_Vacancy_Match_Agent
           mkdir -p data/collected data/criteria data/filters output
-
-          if [ ! -d .venv ]; then
-            python3 -m venv .venv
-          fi
-
+          if [ ! -d .venv ]; then python3 -m venv .venv; fi
           .venv/bin/python -m pip install --upgrade pip
-
-          if [ -s requirements.txt ]; then
-            .venv/bin/pip install -r requirements.txt
-          fi
-
+          if [ -s requirements.txt ]; then .venv/bin/pip install -r requirements.txt; fi
           chown -R app:app /home/app/AISearchJob
           install -m 0644 /home/app/AISearchJob/deploy/superjobsearch.service /etc/systemd/system/superjobsearch.service
           systemctl daemon-reload
           systemctl enable superjobsearch
           systemctl restart superjobsearch
           systemctl is-active --quiet superjobsearch
+          echo deploy complete
           EOF
