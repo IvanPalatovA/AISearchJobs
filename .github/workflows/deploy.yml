@@ -26,13 +26,33 @@ jobs:
           test -n "$SERVER_SSH_KEY" || { echo "SERVER_SSH_KEY secret is empty"; exit 1; }
 
           mkdir -p ~/.ssh
-          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" | sed 's/\r$//' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
+          echo "Deploy key fingerprint:"
+          ssh-keygen -lf ~/.ssh/deploy_key
+
           ssh-keyscan -T 10 -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          {
+            echo "Host deploy-target"
+            echo "  HostName ${SERVER_HOST}"
+            echo "  User ${SERVER_USER}"
+            echo "  IdentityFile ~/.ssh/deploy_key"
+            echo "  IdentitiesOnly yes"
+            echo "  PubkeyAuthentication yes"
+            echo "  PreferredAuthentications publickey"
+            echo "  StrictHostKeyChecking accept-new"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+          ssh deploy-target "echo deploy ssh ok"
 
       - name: Sync files
         run: |
-          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" \
+          ssh deploy-target \
             "command -v rsync >/dev/null || (sudo apt-get update && sudo apt-get install -y rsync)"
 
           rsync -az --delete \
@@ -48,18 +68,18 @@ jobs:
             --exclude 'AI_Vacancy_Match_Agent/output' \
             --exclude 'AI_Vacancy_Match_Agent/*.csv' \
             --exclude 'AI_Vacancy_Match_Agent/*.json' \
-            -e "ssh -i ~/.ssh/deploy_key" \
-            ./ "$SERVER_USER@$SERVER_HOST:/home/app/AISearchJob/"
+            -e "ssh -F ~/.ssh/config deploy-target" \
+            ./ deploy-target:/home/app/AISearchJob/
 
       - name: Update env file
         if: ${{ env.ENV_FILE != '' }}
         run: |
-          printf '%s\n' "$ENV_FILE" | ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" \
+          printf '%s\n' "$ENV_FILE" | ssh deploy-target \
             "cat > /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chown app:app /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env && chmod 600 /home/app/AISearchJob/AI_Vacancy_Match_Agent/.env"
 
       - name: Restart app
         run: |
-          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" <<'EOF'
+          ssh deploy-target <<'EOF'
           set -euo pipefail
 
           cd /home/app/AISearchJob/AI_Vacancy_Match_Agent
